@@ -3,6 +3,7 @@ module GradientTest
 import Calculus
 
 using Test
+using LinearAlgebra
 using ForwardDiff
 using ForwardDiff: Dual, Tag
 using StaticArrays
@@ -148,12 +149,33 @@ end
     @test isequal(ForwardDiff.gradient(t -> t[1]^t[2], [0.0,  1.5]), [0.0, 0.0])
 end
 
+#############
+# bug fixes #
+#############
+
 # Issue 399
 @testset "chunk size zero" begin
     f_const(x) = 1.0
     g_grad_const = x -> ForwardDiff.gradient(f_const, x)
     @test g_grad_const([1.0]) == [0.0]
     @test isempty(g_grad_const(zeros(Float64, 0)))
+end
+
+# Issue 197
+@testset "det with branches" begin
+    det2(A) = return (
+        A[1,1]*(A[2,2]*A[3,3]-A[2,3]*A[3,2]) -
+        A[1,2]*(A[2,1]*A[3,3]-A[2,3]*A[3,1]) +
+        A[1,3]*(A[2,1]*A[3,2]-A[2,2]*A[3,1])
+    )
+
+    A = [1 0 0; 0 2 0; 0 pi 3]
+    @test det2(A) == det(A) == 6
+    @test istril(A)
+
+    ∇A = [6 0 0; 0 3 -pi; 0 0 2]
+    @test ForwardDiff.gradient(det2, A) ≈ ∇A
+    @test ForwardDiff.gradient(det, A) ≈ ∇A
 end
 
 end # module
