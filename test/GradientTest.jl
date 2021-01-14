@@ -161,8 +161,8 @@ end
     @test isempty(g_grad_const(zeros(Float64, 0)))
 end
 
-# Issue 197
 @testset "det with branches" begin
+    # Issue 197
     det2(A) = return (
         A[1,1]*(A[2,2]*A[3,3]-A[2,3]*A[3,2]) -
         A[1,2]*(A[2,1]*A[3,3]-A[2,3]*A[3,1]) +
@@ -179,7 +179,12 @@ end
 
     # And issue 407
     @test ForwardDiff.hessian(det, A) ≈ ForwardDiff.hessian(det2, A)
+end
 
+@testset "dimension errors for gradient" begin
+    @test_throws DimensionMismatch ForwardDiff.gradient(identity, 2pi) # input
+    @test_throws DimensionMismatch ForwardDiff.gradient(identity, fill(2pi, 2)) # vector_mode_gradient
+    @test_throws DimensionMismatch ForwardDiff.gradient(identity, fill(2pi, 10^6)) # chunk_mode_gradient
 end
 
 end # module

@@ -90,17 +90,19 @@ end
 @inline jacobian!(result::Union{AbstractArray,DiffResult}, f, x::StaticArray, cfg::JacobianConfig) = jacobian!(result, f, x)
 @inline jacobian!(result::Union{AbstractArray,DiffResult}, f, x::StaticArray, cfg::JacobianConfig, ::Val) = jacobian!(result, f, x)
 
+jacobian(f, x::Real) = throw(DimensionMismatch("jacobian(f, x) expects that x is an array. Perhaps you meant derivative(f, x)?"))
+
 #####################
 # result extraction #
 #####################
 
-@generated function extract_jacobian(::Type{T}, ydual::StaticArray, x::StaticArray) where T
+@generated function extract_jacobian(::Type{T}, ydual::StaticArray, x::S) where {T,S<:StaticArray}
     M, N = length(ydual), length(x)
     result = Expr(:tuple, [:(partials(T, ydual[$i], $j)) for i in 1:M, j in 1:N]...)
-    V = StaticArrays.similar_type(x, valtype(eltype(ydual)), Size(M, N))
     return quote
         $(Expr(:meta, :inline))
-        return $V($result)
+        V = StaticArrays.similar_type(S, valtype(eltype($ydual)), Size($M, $N))
+        return V($result)
     end
 end
 
@@ -111,9 +113,10 @@ end
 
 function extract_jacobian!(::Type{T}, result::AbstractArray, ydual::AbstractArray, n) where {T}
     out_reshaped = reshape(result, length(ydual), n)
-    for col in 1:size(out_reshaped, 2), row in 1:size(out_reshaped, 1)
-        out_reshaped[row, col] = partials(T, ydual[row], col)
-    end
+    ydual_reshaped = vec(ydual)
+    # Use closure to avoid GPU broadcasting with Type
+    partials_wrap(ydual, nrange) = partials(T, ydual, nrange)
+    out_reshaped .= partials_wrap.(ydual_reshaped, transpose(1:n))
     return result
 end
 
@@ -123,13 +126,13 @@ function extract_jacobian!(::Type{T}, result::MutableDiffResult, ydual::Abstract
 end
 
 function extract_jacobian_chunk!(::Type{T}, result, ydual, index, chunksize) where {T}
+    ydual_reshaped = vec(ydual)
     offset = index - 1
-    for i in 1:chunksize
-        col = i + offset
-        for row in eachindex(ydual)
-            result[row, col] = partials(T, ydual[row], i)
-        end
-    end
+    irange = 1:chunksize
+    col = irange .+ offset
+    # Use closure to avoid GPU broadcasting with Type
+    partials_wrap(ydual, nrange) = partials(T, ydual, nrange)
+    result[:, col] .= partials_wrap.(ydual_reshaped, transpose(irange))
     return result
 end
 
@@ -142,6 +145,7 @@ reshape_jacobian(result::DiffResult, ydual, xdual) = reshape_jacobian(DiffResult
 
 function vector_mode_jacobian(f::F, x, cfg::JacobianConfig{T,V,N}) where {F,T,V,N}
     ydual = vector_mode_dual_eval(f, x, cfg)
+    ydual isa AbstractArray || throw(JACOBIAN_ERROR)
     result = similar(ydual, valtype(eltype(ydual)), length(ydual), N)
     extract_jacobian!(T, result, ydual, N)
     extract_value!(T, result, ydual)
@@ -193,6 +197,8 @@ end
     return result
 end
 
+const JACOBIAN_ERROR = DimensionMismatch("jacobian(f, x) expexts that f(x) is an array. Perhaps you meant gradient(f, x)?")
+
 # chunk mode #
 #------------#
 
@@ -215,6 +221,7 @@ function jacobian_chunk_mode_expr(work_array_definition::Expr, compute_ydual::Ex
         # do first chunk manually to calculate output type
         seed!(xdual, x, 1, seeds)
         $(compute_ydual)
+        ydual isa AbstractArray || throw(JACOBIAN_ERROR)
         $(result_definition)
         out_reshaped = reshape_jacobian(result, ydual, xdual)
         extract_jacobian_chunk!(T, out_reshaped, ydual, 1, N)
