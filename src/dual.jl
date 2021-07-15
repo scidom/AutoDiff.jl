@@ -381,7 +381,6 @@ Base.convert(::Type{Dual{T,V,N}}, x::Number) where {T,V,N} = Dual{T}(convert(V, 
 Base.convert(::Type{D}, d::D) where {D<:Dual} = d
 
 Base.float(d::Dual{T,V,N}) where {T,V,N} = convert(Dual{T,promote_type(V, Float16),N}, d)
-Base.AbstractFloat(d::Dual{T,V,N}) where {T,V,N} = convert(Dual{T,promote_type(V, Float16),N}, d)
 
 ###################################
 # General Mathematical Operations #
